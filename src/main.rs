@@ -90,7 +90,9 @@ fn get_monitors() -> Result<Vec<Monitor>> {
     Ok(monitors)
 }
 
-fn list(monitors: Vec<Monitor>) -> Result<()> {
+fn list() -> Result<()> {
+    let monitors = get_monitors()?;
+
     for monitor in monitors.iter() {
         println!(
             "Found the following inputs available on {:?}:",
@@ -115,11 +117,9 @@ fn main() -> Result<()> {
 
     let args: Args = argh::from_env();
 
-    let monitors = get_monitors()?;
-
     match args.commands {
         Commands::Switch(x) => switch(x.monitor, x.input, inputs_codes)?,
-        Commands::List(_) => list(monitors)?,
+        Commands::List(_) => list()?,
     }
 
     Ok(())
