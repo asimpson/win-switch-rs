@@ -1,16 +1,10 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use argh::FromArgs;
-use ddc_hi::Display;
+use ddc_hi::{Ddc, Display};
 use mccs_db::ValueType;
+use std::collections::HashMap;
 
 const INPUT_SELECT: u8 = 0x60;
-
-// symbolic_input_source! {
-//     DisplayPort1: 0x0f
-//     DisplayPort2: 0x10
-//     Hdmi1: 0x11
-//     Hdmi2: 0x12
-// }
 
 #[derive(FromArgs, Debug)]
 #[argh(description = "monitor-switch: switch monitors via DDC/CI")]
@@ -39,24 +33,40 @@ pub struct Switch {
     monitor: String,
 }
 
-fn switch(monitor: String, input: String) -> Result<()> {
-    // if display.info.model_name == Some(String::from("S2719DGF")) {
-    //   display.update_capabilities().unwrap();
-    //   let feature = display.info.mccs_database.get(INPUT_SELECT);
-    //   // display.handle.set_vcp_feature(INPUT_SELECT, 0x12).expect("switched to HDMI2");
-    // }
+struct Monitor {
+    name: String,
+    inputs: Vec<String>,
+}
+
+fn switch(monitor: String, input: String, codes: HashMap<&str, u16>) -> Result<()> {
+    for mut display in Display::enumerate() {
+        let _ = display.update_capabilities();
+
+        if let Some(name) = display.info.model_name {
+            if name == monitor {
+                let code = codes[input.as_str()];
+                display
+                    .handle
+                    .set_vcp_feature(INPUT_SELECT, code)
+                    .expect("switched!");
+            }
+        }
+    }
     Ok(())
 }
 
-fn list() -> Result<()> {
-    println!("Listing displays...");
+fn get_monitors() -> Result<Vec<Monitor>> {
+    let mut monitors = vec![];
+
     for mut display in Display::enumerate() {
-        println!("---Display---");
-        if let Err(err) = display.update_capabilities() {
-            println!("Error getting display capabilities: {}", err);
-        }
-        if let Some(d) = display.info.model_name {
-            println!("{} has the following inputs:", d);
+        let mut monitor: Monitor = Monitor {
+            name: "".to_string(),
+            inputs: vec![],
+        };
+
+        let _ = display.update_capabilities();
+        if let Some(name) = display.info.model_name {
+            monitor.name = name;
         }
 
         if let Some(d) = display.info.mccs_database.get(INPUT_SELECT) {
@@ -65,24 +75,51 @@ fn list() -> Result<()> {
                 values,
             } = &d.ty
             {
+                let mut inputs: Vec<String> = vec![];
                 for input_types in values.values() {
                     match input_types {
-                        Some(input) => println!("{:?}", input),
+                        Some(input) => inputs.push(input.to_string()),
                         None => (),
-                    }
+                    };
                 }
+                monitor.inputs = inputs;
             }
+            monitors.push(monitor);
+        }
+    }
+    Ok(monitors)
+}
+
+fn list(monitors: Vec<Monitor>) -> Result<()> {
+    for monitor in monitors.iter() {
+        println!(
+            "Found the following inputs available on {:?}:",
+            monitor.name
+        );
+
+        for input in monitor.inputs.iter() {
+            println!("{:?}", input);
         }
     }
     Ok(())
 }
 
 fn main() -> Result<()> {
+    let mut inputs_codes: HashMap<&str, u16> = HashMap::new();
+    inputs_codes.insert("DVI 1", 0x03);
+    inputs_codes.insert("DVI 2", 0x04);
+    inputs_codes.insert("DisplayPort 1", 0x0f);
+    inputs_codes.insert("DisplayPort 2", 0x10);
+    inputs_codes.insert("HDMI 1", 0x11);
+    inputs_codes.insert("HDMI 2", 0x12);
+
     let args: Args = argh::from_env();
 
+    let monitors = get_monitors()?;
+
     match args.commands {
-        Commands::Switch(x) => switch(x.monitor, x.input)?,
-        Commands::List(_) => list()?,
+        Commands::Switch(x) => switch(x.monitor, x.input, inputs_codes)?,
+        Commands::List(_) => list(monitors)?,
     }
 
     Ok(())
